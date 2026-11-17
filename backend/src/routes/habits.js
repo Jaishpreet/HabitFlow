@@ -8,14 +8,13 @@ const router = express.Router();
 // ============================================================
 // GET ALL HABITS
 // ============================================================
-
 router.get('/', auth, async (req, res) => {
     try {
-        const habits = await Habit.find({ userId: req.userId })
-            .sort({ createdAt: -1 });
+        const habits = await Habit.find({ userId: req.userId }).sort({ createdAt: -1 });
         
-        const today = new Date();
-        today.setHours(0, 0, 0, 0);
+        // Force local time to match the frontend
+        const now = new Date();
+        const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
         
         const habitsWithStatus = await Promise.all(habits.map(async (habit) => {
             const log = await HabitLog.findOne({
@@ -38,21 +37,17 @@ router.get('/', auth, async (req, res) => {
 // ============================================================
 // CREATE A HABIT
 // ============================================================
-
 router.post('/', auth, async (req, res) => {
     try {
         const { name, description } = req.body;
-
         if (!name || name.trim().length === 0) {
             return res.status(400).json({ error: 'Habit name is required' });
         }
-
         const habit = new Habit({
             userId: req.userId,
             name: name.trim(),
             description: description?.trim() || ''
         });
-
         await habit.save();
         res.status(201).json({ ...habit.toObject(), todayCompleted: false });
     } catch (error) {
@@ -63,18 +58,10 @@ router.post('/', auth, async (req, res) => {
 // ============================================================
 // DELETE A HABIT
 // ============================================================
-
 router.delete('/:id', auth, async (req, res) => {
     try {
-        const habit = await Habit.findOneAndDelete({
-            _id: req.params.id,
-            userId: req.userId
-        });
-
-        if (!habit) {
-            return res.status(404).json({ error: 'Habit not found' });
-        }
-
+        const habit = await Habit.findOneAndDelete({ _id: req.params.id, userId: req.userId });
+        if (!habit) return res.status(404).json({ error: 'Habit not found' });
         await HabitLog.deleteMany({ habitId: req.params.id });
         res.json({ message: 'Habit deleted successfully' });
     } catch (error) {
@@ -83,30 +70,25 @@ router.delete('/:id', auth, async (req, res) => {
 });
 
 // ============================================================
-// TOGGLE COMPLETION (WITH CUSTOM DATE SUPPORT)
+// TOGGLE COMPLETION
 // ============================================================
-
 router.post('/:id/log', auth, async (req, res) => {
     try {
         const { completed, date } = req.body;
+        const habit = await Habit.findOne({ _id: req.params.id, userId: req.userId });
+        if (!habit) return res.status(404).json({ error: 'Habit not found' });
 
-        const habit = await Habit.findOne({
-            _id: req.params.id,
-            userId: req.userId
-        });
-
-        if (!habit) {
-            return res.status(404).json({ error: 'Habit not found' });
+        // Fix timezone issue by forcing local time
+        let logDate;
+        if (date) {
+            const [y, m, d] = date.split('-');
+            logDate = new Date(y, m - 1, d);
+        } else {
+            const now = new Date();
+            logDate = new Date(now.getFullYear(), now.getMonth(), now.getDate());
         }
 
-        let logDate = date ? new Date(date) : new Date();
-        logDate.setHours(0, 0, 0, 0);
-
-        let log = await HabitLog.findOne({
-            habitId: req.params.id,
-            userId: req.userId,
-            date: logDate
-        });
+        let log = await HabitLog.findOne({ habitId: req.params.id, userId: req.userId, date: logDate });
 
         if (log) {
             log.completed = completed !== undefined ? completed : !log.completed;
@@ -120,7 +102,6 @@ router.post('/:id/log', auth, async (req, res) => {
             });
             await log.save();
         }
-
         res.json(log);
     } catch (error) {
         res.status(500).json({ error: error.message });
@@ -128,38 +109,28 @@ router.post('/:id/log', auth, async (req, res) => {
 });
 
 // ============================================================
-// GET HABIT HISTORY (Calendar Grid) - FETCH ALL TIME
+// GET ALL HISTORY AT ONCE (SUPER FAST)
 // ============================================================
-
-router.get('/:id/history', auth, async (req, res) => {
+router.get('/history/all', auth, async (req, res) => {
     try {
-        const habit = await Habit.findOne({
-            _id: req.params.id,
-            userId: req.userId
-        });
-
-        if (!habit) {
-            return res.status(404).json({ error: 'Habit not found' });
-        }
-
-        // ✅ REMOVED THE 30 DAY LIMIT - Now fetches ALL logs ever for this habit
-        const logs = await HabitLog.find({
-            habitId: req.params.id,
-            userId: req.userId
-        }).sort({ date: 1 });
-
+        const logs = await HabitLog.find({ userId: req.userId }).sort({ date: 1 });
+        
         const historyMap = {};
         logs.forEach(log => {
-            const dateKey = log.date.toISOString().split('T')[0];
-            historyMap[dateKey] = log.completed;
+            const d = new Date(log.date);
+            const dateKey = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+            
+            if (!historyMap[dateKey]) historyMap[dateKey] = [];
+            if (log.completed) {
+                historyMap[dateKey].push(log.habitId.toString());
+            }
         });
 
-        // Find the earliest log date to build the calendar from
         let startDate = new Date();
         if (logs.length > 0) {
             startDate = new Date(logs[0].date);
         } else {
-            startDate.setDate(startDate.getDate() - 30); // Default 30 days if empty
+            startDate.setDate(startDate.getDate() - 30);
         }
         startDate.setHours(0, 0, 0, 0);
 
@@ -169,23 +140,17 @@ router.get('/:id/history', auth, async (req, res) => {
         const allDates = [];
         const currentDate = new Date(startDate);
         while (currentDate <= endDate) {
-            const dateKey = currentDate.toISOString().split('T')[0];
+            const dateKey = `${currentDate.getFullYear()}-${String(currentDate.getMonth() + 1).padStart(2, '0')}-${String(currentDate.getDate()).padStart(2, '0')}`;
             allDates.push({
                 date: dateKey,
-                completed: historyMap[dateKey] || false,
+                habitIds: historyMap[dateKey] || [],
                 day: currentDate.getDate(),
                 month: currentDate.toLocaleString('default', { month: 'short' })
             });
             currentDate.setDate(currentDate.getDate() + 1);
         }
 
-        res.json({
-            habit: habit,
-            history: allDates,
-            totalDays: allDates.length,
-            completedDays: allDates.filter(d => d.completed).length,
-            streak: calculateStreak(allDates)
-        });
+        res.json(allDates);
     } catch (error) {
         res.status(500).json({ error: error.message });
     }
@@ -194,7 +159,6 @@ router.get('/:id/history', auth, async (req, res) => {
 // ============================================================
 // EXPORT ALL HABIT DATA (CSV)
 // ============================================================
-
 router.get('/export', auth, async (req, res) => {
     try {
         const habits = await Habit.find({ userId: req.userId });
@@ -211,27 +175,10 @@ router.get('/export', auth, async (req, res) => {
                 });
             }
         }
-
         res.json(exportData);
     } catch (error) {
         res.status(500).json({ error: error.message });
     }
 });
-
-// ============================================================
-// HELPER FUNCTIONS
-// ============================================================
-
-function calculateStreak(dates) {
-    let streak = 0;
-    for (let i = dates.length - 1; i >= 0; i--) {
-        if (dates[i].completed) {
-            streak++;
-        } else {
-            break;
-        }
-    }
-    return streak;
-}
 
 export default router;
