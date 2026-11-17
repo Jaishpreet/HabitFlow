@@ -128,13 +128,11 @@ router.post('/:id/log', auth, async (req, res) => {
 });
 
 // ============================================================
-// GET HABIT HISTORY (Calendar Grid)
+// GET HABIT HISTORY (Calendar Grid) - FETCH ALL TIME
 // ============================================================
 
 router.get('/:id/history', auth, async (req, res) => {
     try {
-        const { days = 30 } = req.query;
-
         const habit = await Habit.findOne({
             _id: req.params.id,
             userId: req.userId
@@ -144,17 +142,10 @@ router.get('/:id/history', auth, async (req, res) => {
             return res.status(404).json({ error: 'Habit not found' });
         }
 
-        const endDate = new Date();
-        endDate.setHours(23, 59, 59, 999);
-        
-        const startDate = new Date();
-        startDate.setDate(startDate.getDate() - parseInt(days));
-        startDate.setHours(0, 0, 0, 0);
-
+        // ✅ REMOVED THE 30 DAY LIMIT - Now fetches ALL logs ever for this habit
         const logs = await HabitLog.find({
             habitId: req.params.id,
-            userId: req.userId,
-            date: { $gte: startDate, $lte: endDate }
+            userId: req.userId
         }).sort({ date: 1 });
 
         const historyMap = {};
@@ -162,6 +153,18 @@ router.get('/:id/history', auth, async (req, res) => {
             const dateKey = log.date.toISOString().split('T')[0];
             historyMap[dateKey] = log.completed;
         });
+
+        // Find the earliest log date to build the calendar from
+        let startDate = new Date();
+        if (logs.length > 0) {
+            startDate = new Date(logs[0].date);
+        } else {
+            startDate.setDate(startDate.getDate() - 30); // Default 30 days if empty
+        }
+        startDate.setHours(0, 0, 0, 0);
+
+        const endDate = new Date();
+        endDate.setHours(23, 59, 59, 999);
 
         const allDates = [];
         const currentDate = new Date(startDate);

@@ -38,24 +38,27 @@ const MonthlyCalendar = ({ habits, history }) => {
     // Create a map of completed dates for each habit
     const habitCompletions = {};
     if (history && habits.length > 0) {
-        // Group history by date
+        // Group history by date AND habitId
         const dateMap = {};
         history.forEach(day => {
-            if (!dateMap[day.date]) dateMap[day.date] = [];
-            dateMap[day.date].push(day.completed);
+            if (!dateMap[day.date]) dateMap[day.date] = new Set();
+            // Only add to the Set if it was actually completed
+            if (day.completed) {
+                dateMap[day.date].add(day.habitId);
+            }
         });
         
-        // For each date, count how many habits were completed
+        // For each date, count how many UNIQUE habits were completed
         for (const date in dateMap) {
-            const completions = dateMap[date];
+            const uniqueCompletedHabits = dateMap[date].size; // Set ensures no duplicates
             const totalHabits = habits.length;
-            const completedCount = completions.filter(c => c).length;
+            
             habitCompletions[date] = {
-                completed: completedCount,
+                completed: uniqueCompletedHabits,
                 total: totalHabits,
-                allDone: completedCount === totalHabits,
-                someDone: completedCount > 0 && completedCount < totalHabits,
-                noneDone: completedCount === 0
+                allDone: uniqueCompletedHabits === totalHabits,
+                someDone: uniqueCompletedHabits > 0 && uniqueCompletedHabits < totalHabits,
+                noneDone: uniqueCompletedHabits === 0
             };
         }
     }
@@ -218,7 +221,7 @@ const HabitsPage = () => {
     }, []);
 
     // ============================================================
-    // FIXED: Get history for ALL habits
+    // FIXED: Get history for ALL habits and tag with habitId
     // ============================================================
 
     const fetchHabits = async () => {
@@ -226,14 +229,18 @@ const HabitsPage = () => {
             const response = await axios.get(`${API_URL}/habits`);
             setHabits(response.data);
             
-            // ✅ Get history for ALL habits
             if (response.data.length > 0) {
                 const allHistory = [];
                 for (const habit of response.data) {
                     try {
                         const histRes = await axios.get(`${API_URL}/habits/${habit._id}/history`);
                         if (histRes.data.history) {
-                            allHistory.push(...histRes.data.history);
+                            // ✅ Tag each log with its habitId so we don't mix them up
+                            const habitLogs = histRes.data.history.map(log => ({
+                                ...log,
+                                habitId: habit._id
+                            }));
+                            allHistory.push(...habitLogs);
                         }
                     } catch (error) {
                         console.log(`No history for ${habit.name}`);
@@ -265,6 +272,8 @@ const HabitsPage = () => {
             setNewHabitDesc('');
             setShowAddForm(false);
             toast.success('Habit created! 💪');
+            // Re-fetch history so the calendar updates properly with the new habit
+            fetchHabits();
         } catch (error) {
             toast.error(error.response?.data?.error || 'Failed to create habit');
         }
@@ -281,6 +290,8 @@ const HabitsPage = () => {
                     ? { ...h, todayCompleted: !currentStatus }
                     : h
             ));
+            // Re-fetch history so the calendar updates instantly
+            fetchHabits(); 
         } catch (error) {
             toast.error('Failed to update habit');
         } finally {
@@ -295,6 +306,8 @@ const HabitsPage = () => {
             await axios.delete(`${API_URL}/habits/${habitId}`);
             setHabits(habits.filter(h => h._id !== habitId));
             toast.success('Habit deleted');
+            // Re-fetch history to clean up the calendar
+            fetchHabits();
         } catch (error) {
             toast.error('Failed to delete habit');
         }
@@ -307,19 +320,21 @@ const HabitsPage = () => {
 
     const calculateStreak = () => {
         let streak = 0;
-        // Group history by date and check if ALL habits were done each day
         if (history.length === 0 || habits.length === 0) return 0;
         
+        // Group history by date and count unique habits
         const dateMap = {};
         history.forEach(day => {
-            if (!dateMap[day.date]) dateMap[day.date] = [];
-            dateMap[day.date].push(day.completed);
+            if (!dateMap[day.date]) dateMap[day.date] = new Set();
+            if (day.completed) {
+                dateMap[day.date].add(day.habitId);
+            }
         });
         
         const dates = Object.keys(dateMap).sort();
         for (let i = dates.length - 1; i >= 0; i--) {
-            const completions = dateMap[dates[i]];
-            const allDone = completions.filter(c => c).length === habits.length;
+            const uniqueCompletedHabits = dateMap[dates[i]].size;
+            const allDone = uniqueCompletedHabits === habits.length;
             if (allDone) {
                 streak++;
             } else {
