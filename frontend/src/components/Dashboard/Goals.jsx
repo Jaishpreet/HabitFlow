@@ -21,10 +21,9 @@ const Goals = () => {
             const habitsRes = await axios.get(`${API_URL}/habits`);
             setHabits(habitsRes.data);
             
-            if (habitsRes.data.length > 0) {
-                const histRes = await axios.get(`${API_URL}/habits/${habitsRes.data[0]._id}/history`);
-                setHistory(histRes.data.history || []);
-            }
+            // ✅ FAST LOADING: Fetch all history at once
+            const historyRes = await axios.get(`${API_URL}/habits/history/all`);
+            setHistory(historyRes.data);
 
             // Load goals from localStorage
             const stored = localStorage.getItem('habitGoals');
@@ -84,13 +83,20 @@ const Goals = () => {
 
     const getGoalProgress = (goal) => {
         let streak = 0;
+        
+        // Calculate current streak for this specific habit using the new data structure
         for (let i = history.length - 1; i >= 0; i--) {
-            if (history[i].completed) {
+            const dayData = history[i];
+            // Check if this habit was completed on this day
+            if (dayData.habitIds.includes(goal.habitId)) {
                 streak++;
+            } else if (dayData.date === new Date().toISOString().split('T')[0]) {
+                continue; // Skip today if not done yet
             } else {
                 break;
             }
         }
+        
         return Math.min(Math.round((streak / goal.targetDays) * 100), 100);
     };
 
