@@ -11,8 +11,8 @@ const Goals = () => {
 
     // Form States
     const [selectedHabit, setSelectedHabit] = useState('');
-    const [goalType, setGoalType] = useState('consistency'); // 'consistency' or 'flexible'
-    const [targetAmount, setTargetAmount] = useState(7);
+    const [goalType, setGoalType] = useState('consistency'); 
+    const [targetAmount, setTargetAmount] = useState(7); 
     const [startDate, setStartDate] = useState(new Date().toISOString().split('T')[0]);
     const [endDate, setEndDate] = useState(() => {
         const d = new Date();
@@ -32,7 +32,7 @@ const Goals = () => {
             const historyRes = await axios.get(`${API_URL}/habits/history/all`);
             setHistory(historyRes.data);
 
-            const stored = localStorage.getItem('habitGoalsV2'); // V2 to start fresh
+            const stored = localStorage.getItem('habitGoalsV2');
             if (stored) {
                 setGoals(JSON.parse(stored));
             }
@@ -48,9 +48,31 @@ const Goals = () => {
         setGoals(updatedGoals);
     };
 
+    // Helper to count days between two dates (inclusive)
+    const getDaysBetween = (start, end) => {
+        if (!start || !end) return 0;
+        const startD = new Date(start);
+        const endD = new Date(end);
+        if (startD > endD) return 0;
+        
+        const diffTime = Math.abs(endD - startD);
+        const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)) + 1; 
+        return diffDays;
+    };
+
+    const maxDaysInRange = getDaysBetween(startDate, endDate);
+
+    // Format date to "Mon DD, YYYY" (e.g., Nov 15, 2026)
+    const formatDate = (dateString) => {
+        if (!dateString) return '';
+        const options = { year: 'numeric', month: 'short', day: 'numeric' };
+        // Append time to prevent timezone shifting the day backwards
+        return new Date(dateString + 'T00:00:00').toLocaleDateString('en-US', options);
+    };
+
     const addGoal = () => {
-        if (!selectedHabit || targetAmount < 1) {
-            toast.error('Please select a habit and set a valid target');
+        if (!selectedHabit) {
+            toast.error('Please select a habit');
             return;
         }
         if (new Date(startDate) > new Date(endDate)) {
@@ -58,12 +80,27 @@ const Goals = () => {
             return;
         }
 
+        let finalTarget = targetAmount;
+
+        if (goalType === 'consistency') {
+            finalTarget = maxDaysInRange;
+        } else {
+            if (targetAmount < 1) {
+                toast.error('Target must be at least 1');
+                return;
+            }
+            if (targetAmount > maxDaysInRange) {
+                toast.error(`Target cannot exceed the ${maxDaysInRange} total days in this range.`);
+                return;
+            }
+        }
+
         const newGoalObj = {
             id: Date.now().toString(),
             habitId: selectedHabit,
             habitName: habits.find(h => h._id === selectedHabit)?.name || 'Unknown',
             type: goalType,
-            target: parseInt(targetAmount),
+            target: parseInt(finalTarget),
             startDate: startDate,
             endDate: endDate,
             createdAt: new Date().toISOString()
@@ -72,9 +109,7 @@ const Goals = () => {
         const updated = [newGoalObj, ...goals];
         saveGoals(updated);
         
-        // Reset Form
         setSelectedHabit('');
-        setTargetAmount(7);
         toast.success('Challenge created! 🎯');
     };
 
@@ -85,9 +120,7 @@ const Goals = () => {
         toast.success('Challenge deleted');
     };
 
-    // Core Logic: Calculate Progress based on Date Range and Type
     const calculateProgress = (goal) => {
-        // 1. Filter history for this specific habit and within the date range
         const relevantDays = history.filter(day => 
             day.date >= goal.startDate && 
             day.date <= goal.endDate && 
@@ -97,31 +130,21 @@ const Goals = () => {
         const completedCount = relevantDays.length;
         const todayStr = new Date().toISOString().split('T')[0];
         
-        // Determine Status
         let status = 'active';
         let progressPercent = 0;
         let displayString = '';
 
         if (goal.type === 'flexible') {
-            // Flexible Target Logic
             progressPercent = Math.min(Math.round((completedCount / goal.target) * 100), 100);
             displayString = `${completedCount} / ${goal.target} times`;
             
-            if (completedCount >= goal.target) {
-                status = 'completed';
-            } else if (todayStr > goal.endDate) {
-                status = 'failed';
-            }
+            if (completedCount >= goal.target) status = 'completed';
+            else if (todayStr > goal.endDate) status = 'failed';
         } else {
-            // Consistency (Streak) Logic
-            // We need to find the max consecutive days within the range
             let currentStreak = 0;
             let maxStreak = 0;
-            
-            // Create a set of completed dates for O(1) lookup
             const completedDates = new Set(relevantDays.map(d => d.date));
             
-            // Loop through the date range day by day
             let loopDate = new Date(goal.startDate);
             const endLoopDate = new Date(goal.endDate);
             
@@ -137,16 +160,13 @@ const Goals = () => {
             }
 
             progressPercent = Math.min(Math.round((maxStreak / goal.target) * 100), 100);
-            displayString = `Best: ${maxStreak} / ${goal.target} days in a row`;
-
-            if (maxStreak >= goal.target) {
-                status = 'completed';
-            } else if (todayStr > goal.endDate) {
-                status = 'failed';
-            }
+            displayString = `Best Streak: ${maxStreak} / ${goal.target} days`;
+            
+            if (maxStreak >= goal.target) status = 'completed';
+            else if (todayStr > goal.endDate) status = 'failed';
         }
 
-        return { progressPercent, displayString, status, completedCount };
+        return { progressPercent, displayString, status };
     };
 
     if (loading) {
@@ -157,18 +177,13 @@ const Goals = () => {
         <div className="max-w-4xl mx-auto px-4 py-8">
             <h1 className="text-2xl font-bold text-gray-900 mb-6">🎯 Challenges & Goals</h1>
 
-            {/* Creation Form */}
             <div className="bg-white rounded-xl p-5 shadow-sm border border-gray-100 mb-8">
                 <h3 className="font-semibold text-gray-900 mb-4">Create a New Challenge</h3>
                 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
                     <div>
                         <label className="text-sm text-gray-600 mb-1 block">Select Habit</label>
-                        <select
-                            value={selectedHabit}
-                            onChange={(e) => setSelectedHabit(e.target.value)}
-                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
-                        >
+                        <select value={selectedHabit} onChange={(e) => setSelectedHabit(e.target.value)} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500">
                             <option value="">Choose a habit...</option>
                             {habits.map(h => <option key={h._id} value={h._id}>{h.name}</option>)}
                         </select>
@@ -176,11 +191,7 @@ const Goals = () => {
 
                     <div>
                         <label className="text-sm text-gray-600 mb-1 block">Challenge Type</label>
-                        <select
-                            value={goalType}
-                            onChange={(e) => setGoalType(e.target.value)}
-                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
-                        >
+                        <select value={goalType} onChange={(e) => setGoalType(e.target.value)} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500">
                             <option value="consistency">Consistency Challenge (Streak)</option>
                             <option value="flexible">Flexible Target (Total Times)</option>
                         </select>
@@ -190,59 +201,52 @@ const Goals = () => {
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-5">
                     <div>
                         <label className="text-sm text-gray-600 mb-1 block">Start Date</label>
-                        <input
-                            type="date"
-                            value={startDate}
-                            onChange={(e) => setStartDate(e.target.value)}
-                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
-                        />
+                        <input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500" />
                     </div>
                     <div>
                         <label className="text-sm text-gray-600 mb-1 block">End Date</label>
-                        <input
-                            type="date"
-                            value={endDate}
-                            onChange={(e) => setEndDate(e.target.value)}
-                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
-                        />
+                        <input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500" />
                     </div>
-                    <div>
-                        <label className="text-sm text-gray-600 mb-1 block">
-                            Target {goalType === 'consistency' ? 'Days in a row' : 'Total Times'}
-                        </label>
-                        <input
-                            type="number"
-                            value={targetAmount}
-                            onChange={(e) => setTargetAmount(e.target.value)}
-                            min={1}
-                            max={365}
-                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
-                        />
-                    </div>
+                    
+                    {goalType === 'flexible' ? (
+                        <div>
+                            <label className="text-sm text-gray-600 mb-1 block">Target Times</label>
+                            <input 
+                                type="number" 
+                                value={targetAmount} 
+                                onChange={(e) => setTargetAmount(e.target.value)} 
+                                min={1} 
+                                max={maxDaysInRange} // Prevents picking more than total days
+                                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500" 
+                            />
+                            <p className="text-xs text-gray-400 mt-1">Max allowed: {maxDaysInRange} times</p>
+                        </div>
+                    ) : (
+                        <div className="flex flex-col justify-end pb-1">
+                            <p className="text-sm text-indigo-600 font-medium">
+                                Target: {maxDaysInRange} days in a row
+                            </p>
+                            <p className="text-xs text-gray-400 mt-1">Automatically set by date range</p>
+                        </div>
+                    )}
                 </div>
 
-                <button
-                    onClick={addGoal}
-                    className="w-full md:w-auto px-6 py-2.5 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors font-medium shadow-sm"
-                >
+                <button onClick={addGoal} className="w-full md:w-auto px-6 py-2.5 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors font-medium shadow-sm">
                     Start Challenge
                 </button>
             </div>
 
-            {/* Goals List */}
             <h3 className="font-semibold text-gray-900 mb-4">Your Active & Past Challenges</h3>
             {goals.length === 0 ? (
                 <div className="text-center py-12 bg-white rounded-xl border-2 border-dashed border-gray-200">
                     <span className="text-5xl block mb-3">🏆</span>
                     <p className="text-gray-500 font-medium">No challenges created yet</p>
-                    <p className="text-gray-400 text-sm">Set a goal above to get started.</p>
                 </div>
             ) : (
                 <div className="grid grid-cols-1 gap-4">
                     {goals.map(goal => {
-                        const { progressPercent, displayString, status, completedCount } = calculateProgress(goal);
+                        const { progressPercent, displayString, status } = calculateProgress(goal);
                         
-                        // Style based on status
                         let badgeColor = 'bg-blue-100 text-blue-700';
                         let badgeText = 'Active';
                         let borderColor = 'border-gray-100';
@@ -266,18 +270,13 @@ const Goals = () => {
                                     <div>
                                         <div className="flex items-center gap-2 mb-1">
                                             <h4 className="text-lg font-bold text-gray-900">{goal.habitName}</h4>
-                                            <span className={`text-xs px-2.5 py-0.5 rounded-full font-medium ${badgeColor}`}>
-                                                {badgeText}
-                                            </span>
+                                            <span className={`text-xs px-2.5 py-0.5 rounded-full font-medium ${badgeColor}`}>{badgeText}</span>
                                         </div>
                                         <p className="text-sm text-gray-500">
-                                            {goal.type === 'consistency' ? 'Consistency Challenge' : 'Flexible Target'} • 
-                                            {goal.startDate} to {goal.endDate}
+                                            {goal.type === 'consistency' ? 'Consistency Challenge' : 'Flexible Target'} • {formatDate(goal.startDate)} to {formatDate(goal.endDate)}
                                         </p>
                                     </div>
-                                    <button onClick={() => deleteGoal(goal.id)} className="text-gray-300 hover:text-red-500 transition-colors p-1">
-                                        🗑️
-                                    </button>
+                                    <button onClick={() => deleteGoal(goal.id)} className="text-gray-300 hover:text-red-500 transition-colors p-1">🗑️</button>
                                 </div>
 
                                 <div className="mt-4">
@@ -286,10 +285,7 @@ const Goals = () => {
                                         <span className="font-bold text-gray-900">{progressPercent}%</span>
                                     </div>
                                     <div className="w-full bg-gray-100 rounded-full h-3">
-                                        <div 
-                                            className={`h-3 rounded-full transition-all duration-500 ${barColor}`}
-                                            style={{ width: `${progressPercent}%` }}
-                                        ></div>
+                                        <div className={`h-3 rounded-full transition-all duration-500 ${barColor}`} style={{ width: `${progressPercent}%` }}></div>
                                     </div>
                                 </div>
                             </div>
