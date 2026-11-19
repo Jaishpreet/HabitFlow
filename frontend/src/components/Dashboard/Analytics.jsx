@@ -26,29 +26,28 @@ const Analytics = () => {
         }
     };
 
-    // ✅ NEW LOGIC: Calculates completion based ONLY on habits that existed on that date
+    // Helper: Get habits that existed on a specific date
     const getActiveHabitsForDate = (dateString) => {
         const dateObj = new Date(dateString);
         return habits.filter(h => new Date(h.createdAt) <= dateObj);
     };
 
-    // Calculate overall stats
-    let totalDays = 0;
+    // 1. Calculate Overall Completion Rate (All Time)
+    let totalDaysTracked = 0;
     let perfectDays = 0;
 
     history.forEach(day => {
         const activeHabits = getActiveHabitsForDate(day.date);
         if (activeHabits.length > 0) {
-            totalDays++;
+            totalDaysTracked++;
             if (day.habitIds.length >= activeHabits.length) {
                 perfectDays++;
             }
         }
     });
+    const completionRate = totalDaysTracked > 0 ? Math.round((perfectDays / totalDaysTracked) * 100) : 0;
 
-    const completionRate = totalDays > 0 ? Math.round((perfectDays / totalDays) * 100) : 0;
-
-    // Calculate Streaks (Using createdAt logic)
+    // 2. Calculate Streaks
     const calculateStreaks = () => {
         let currentStreak = 0, bestStreak = 0, tempStreak = 0;
         if (history.length === 0 || habits.length === 0) return { current: 0, best: 0 };
@@ -75,10 +74,9 @@ const Analytics = () => {
         }
         return { current: currentStreak, best: bestStreak };
     };
-
     const { current: streak, best: bestStreak } = calculateStreaks();
 
-    // Best Day of Week (Using createdAt logic)
+    // 3. Best Day of Week
     const getProductiveDay = () => {
         if (history.length === 0) return 'N/A';
         const dayCount = { 0: 0, 1: 0, 2: 0, 3: 0, 4: 0, 5: 0, 6: 0 };
@@ -96,14 +94,14 @@ const Analytics = () => {
         return max > 0 ? days[Object.keys(dayCount).find(key => dayCount[key] === max)] : 'N/A';
     };
 
-    // Last 7 Days (Using createdAt logic)
+    // 4. Last 7 Days
     const last7Days = history.slice(-7);
     const weeklyCompletion = last7Days.filter(d => {
         const activeHabits = getActiveHabitsForDate(d.date);
         return activeHabits.length > 0 && d.habitIds.length >= activeHabits.length;
     }).length;
 
-    // Monthly Progress (Using createdAt logic)
+    // 5. FIXED: Monthly Progress (Calculates based on total days in the month)
     const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
     const monthlyData = {};
     
@@ -112,15 +110,14 @@ const Analytics = () => {
         const monthKey = `${monthNames[date.getMonth()]} ${date.getFullYear()}`;
         
         if (!monthlyData[monthKey]) {
-            monthlyData[monthKey] = { total: 0, completed: 0 };
+            // Calculate total days in this specific month
+            const daysInMonth = new Date(date.getFullYear(), date.getMonth() + 1, 0).getDate();
+            monthlyData[monthKey] = { totalDaysInMonth: daysInMonth, completed: 0 };
         }
         
         const activeHabits = getActiveHabitsForDate(d.date);
-        if (activeHabits.length > 0) {
-            monthlyData[monthKey].total++;
-            if (d.habitIds.length >= activeHabits.length) {
-                monthlyData[monthKey].completed++;
-            }
+        if (activeHabits.length > 0 && d.habitIds.length >= activeHabits.length) {
+            monthlyData[monthKey].completed++;
         }
     });
 
@@ -134,7 +131,7 @@ const Analytics = () => {
 
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
                 <div className="bg-white rounded-xl p-4 shadow-sm border border-gray-100">
-                    <p className="text-sm text-gray-500">Completion Rate</p>
+                    <p className="text-sm text-gray-500">Overall Rate</p>
                     <p className="text-2xl font-bold text-indigo-600">{completionRate}%</p>
                 </div>
                 <div className="bg-white rounded-xl p-4 shadow-sm border border-gray-100">
@@ -158,12 +155,10 @@ const Analytics = () => {
                         {['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map((day, i) => {
                             const dayData = last7Days[i];
                             let isDone = false;
-                            
                             if (dayData) {
                                 const activeHabits = getActiveHabitsForDate(dayData.date);
                                 isDone = activeHabits.length > 0 && dayData.habitIds.length >= activeHabits.length;
                             }
-
                             return (
                                 <div key={i} className="flex flex-col items-center">
                                     <span className="text-xs text-gray-400 mb-1">{day}</span>
@@ -184,7 +179,8 @@ const Analytics = () => {
                     <div className="space-y-2">
                         {Object.keys(monthlyData).slice(-6).map(month => {
                             const data = monthlyData[month];
-                            const rate = data.total > 0 ? Math.round((data.completed / data.total) * 100) : 0;
+                            // ✅ FIX: Divide by Total Days in Month, not just tracked days
+                            const rate = Math.round((data.completed / data.totalDaysInMonth) * 100);
                             return (
                                 <div key={month} className="flex items-center gap-3">
                                     <span className="text-xs text-gray-500 w-20">{month}</span>
