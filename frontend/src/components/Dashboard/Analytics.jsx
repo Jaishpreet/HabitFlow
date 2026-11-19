@@ -26,17 +26,36 @@ const Analytics = () => {
         }
     };
 
-    // Calculate stats
-    const totalDays = history.length;
-    const completedDays = history.filter(d => d.habitIds.length >= habits.length).length;
-    const completionRate = totalDays > 0 ? Math.round((completedDays / totalDays) * 100) : 0;
+    // ✅ NEW LOGIC: Calculates completion based ONLY on habits that existed on that date
+    const getActiveHabitsForDate = (dateString) => {
+        const dateObj = new Date(dateString);
+        return habits.filter(h => new Date(h.createdAt) <= dateObj);
+    };
 
+    // Calculate overall stats
+    let totalDays = 0;
+    let perfectDays = 0;
+
+    history.forEach(day => {
+        const activeHabits = getActiveHabitsForDate(day.date);
+        if (activeHabits.length > 0) {
+            totalDays++;
+            if (day.habitIds.length >= activeHabits.length) {
+                perfectDays++;
+            }
+        }
+    });
+
+    const completionRate = totalDays > 0 ? Math.round((perfectDays / totalDays) * 100) : 0;
+
+    // Calculate Streaks (Using createdAt logic)
     const calculateStreaks = () => {
         let currentStreak = 0, bestStreak = 0, tempStreak = 0;
         if (history.length === 0 || habits.length === 0) return { current: 0, best: 0 };
         
         for (let i = 0; i < history.length; i++) {
-            if (history[i].habitIds.length >= habits.length) {
+            const activeHabits = getActiveHabitsForDate(history[i].date);
+            if (activeHabits.length > 0 && history[i].habitIds.length >= activeHabits.length) {
                 tempStreak++;
                 if (tempStreak > bestStreak) bestStreak = tempStreak;
             } else {
@@ -45,7 +64,8 @@ const Analytics = () => {
         }
         
         for (let i = history.length - 1; i >= 0; i--) {
-            if (history[i].habitIds.length >= habits.length) {
+            const activeHabits = getActiveHabitsForDate(history[i].date);
+            if (activeHabits.length > 0 && history[i].habitIds.length >= activeHabits.length) {
                 currentStreak++;
             } else if (history[i].date === new Date().toISOString().split('T')[0]) {
                 continue;
@@ -58,31 +78,50 @@ const Analytics = () => {
 
     const { current: streak, best: bestStreak } = calculateStreaks();
 
+    // Best Day of Week (Using createdAt logic)
     const getProductiveDay = () => {
         if (history.length === 0) return 'N/A';
         const dayCount = { 0: 0, 1: 0, 2: 0, 3: 0, 4: 0, 5: 0, 6: 0 };
+        
         history.forEach(d => {
-            if (d.habitIds.length >= habits.length) {
+            const activeHabits = getActiveHabitsForDate(d.date);
+            if (activeHabits.length > 0 && d.habitIds.length >= activeHabits.length) {
                 const date = new Date(d.date);
                 dayCount[date.getDay()]++;
             }
         });
+        
         const max = Math.max(...Object.values(dayCount));
         const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
         return max > 0 ? days[Object.keys(dayCount).find(key => dayCount[key] === max)] : 'N/A';
     };
 
+    // Last 7 Days (Using createdAt logic)
     const last7Days = history.slice(-7);
-    const weeklyCompletion = last7Days.filter(d => d.habitIds.length >= habits.length).length;
+    const weeklyCompletion = last7Days.filter(d => {
+        const activeHabits = getActiveHabitsForDate(d.date);
+        return activeHabits.length > 0 && d.habitIds.length >= activeHabits.length;
+    }).length;
 
+    // Monthly Progress (Using createdAt logic)
     const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
     const monthlyData = {};
+    
     history.forEach(d => {
         const date = new Date(d.date);
         const monthKey = `${monthNames[date.getMonth()]} ${date.getFullYear()}`;
-        if (!monthlyData[monthKey]) monthlyData[monthKey] = { total: 0, completed: 0 };
-        monthlyData[monthKey].total++;
-        if (d.habitIds.length >= habits.length) monthlyData[monthKey].completed++;
+        
+        if (!monthlyData[monthKey]) {
+            monthlyData[monthKey] = { total: 0, completed: 0 };
+        }
+        
+        const activeHabits = getActiveHabitsForDate(d.date);
+        if (activeHabits.length > 0) {
+            monthlyData[monthKey].total++;
+            if (d.habitIds.length >= activeHabits.length) {
+                monthlyData[monthKey].completed++;
+            }
+        }
     });
 
     if (loading) {
@@ -118,7 +157,13 @@ const Analytics = () => {
                     <div className="flex justify-between">
                         {['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map((day, i) => {
                             const dayData = last7Days[i];
-                            const isDone = dayData && dayData.habitIds.length >= habits.length;
+                            let isDone = false;
+                            
+                            if (dayData) {
+                                const activeHabits = getActiveHabitsForDate(dayData.date);
+                                isDone = activeHabits.length > 0 && dayData.habitIds.length >= activeHabits.length;
+                            }
+
                             return (
                                 <div key={i} className="flex flex-col items-center">
                                     <span className="text-xs text-gray-400 mb-1">{day}</span>
@@ -139,7 +184,7 @@ const Analytics = () => {
                     <div className="space-y-2">
                         {Object.keys(monthlyData).slice(-6).map(month => {
                             const data = monthlyData[month];
-                            const rate = Math.round((data.completed / data.total) * 100);
+                            const rate = data.total > 0 ? Math.round((data.completed / data.total) * 100) : 0;
                             return (
                                 <div key={month} className="flex items-center gap-3">
                                     <span className="text-xs text-gray-500 w-20">{month}</span>

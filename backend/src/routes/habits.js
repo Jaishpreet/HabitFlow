@@ -12,7 +12,6 @@ router.get('/', auth, async (req, res) => {
     try {
         const habits = await Habit.find({ userId: req.userId }).sort({ createdAt: -1 });
         
-        // Force local time to match the frontend
         const now = new Date();
         const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
         
@@ -24,6 +23,8 @@ router.get('/', auth, async (req, res) => {
             });
             return {
                 ...habit.toObject(),
+                // ✅ We explicitly send createdAt to the frontend
+                createdAt: habit.createdAt, 
                 todayCompleted: log ? log.completed : false
             };
         }));

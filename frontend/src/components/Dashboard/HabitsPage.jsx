@@ -31,14 +31,22 @@ const MonthlyCalendar = ({ habits, history }) => {
     if (history && habits.length > 0) {
         history.forEach(day => {
             const uniqueHabits = new Set(day.habitIds); 
-            const totalHabits = habits.length;
+            
+            // ✅ NEW LOGIC: Only count habits that existed on this specific date
+            const dateObj = new Date(day.date);
+            const habitsActiveOnThisDay = habits.filter(h => new Date(h.createdAt) <= dateObj);
+            
+            const totalActiveHabits = habitsActiveOnThisDay.length;
             const completedCount = uniqueHabits.size;
             
-            habitCompletions[day.date] = {
-                completed: completedCount,
-                allDone: completedCount >= totalHabits,
-                someDone: completedCount > 0 && completedCount < totalHabits,
-            };
+            // Only evaluate if there were actually habits active on this day
+            if (totalActiveHabits > 0) {
+                habitCompletions[day.date] = {
+                    completed: completedCount,
+                    allDone: completedCount >= totalActiveHabits,
+                    someDone: completedCount > 0 && completedCount < totalActiveHabits,
+                };
+            }
         });
     }
     
@@ -98,10 +106,10 @@ const MonthlyCalendar = ({ habits, history }) => {
                     if (!isFuture && dayData) {
                         if (dayData.allDone) {
                             bgColor = 'bg-green-500'; textColor = 'text-white';
-                            tooltipText = `✅ All ${habits.length} habits done!`;
+                            tooltipText = `✅ All habits done!`;
                         } else if (dayData.someDone) {
                             bgColor = 'bg-yellow-400'; textColor = 'text-white';
-                            tooltipText = `⚠️ ${dayData.completed}/${habits.length} habits done`;
+                            tooltipText = `⚠️ ${dayData.completed} habits done`;
                         } else {
                             bgColor = 'bg-gray-200'; textColor = 'text-gray-400';
                             tooltipText = '❌ No habits done';
@@ -149,7 +157,6 @@ const HabitsPage = () => {
         fetchData();
     }, []);
 
-    // ✅ FAST LOADING: Only 2 API calls total
     const fetchData = async () => {
         try {
             const habitsRes = await axios.get(`${API_URL}/habits`);
@@ -211,17 +218,42 @@ const HabitsPage = () => {
 
     const completedToday = habits.filter(h => h.todayCompleted).length;
     const totalHabits = habits.length;
-    const progress = totalHabits > 0 ? Math.round((completedToday / totalHabits) * 100) : 0;
 
-    // ✅ FIXED: Calculate BOTH Current and Best Streak
+    // ✅ NEW COMPLETION RATE LOGIC: Only counts habits that existed on that day
+    const calculateCompletionRate = () => {
+        if (history.length === 0 || habits.length === 0) return 0;
+        
+        let perfectDays = 0;
+        let validDays = 0;
+
+        history.forEach(day => {
+            const dateObj = new Date(day.date);
+            const habitsActiveOnThisDay = habits.filter(h => new Date(h.createdAt) <= dateObj);
+            
+            if (habitsActiveOnThisDay.length > 0) {
+                validDays++;
+                const uniqueHabits = new Set(day.habitIds);
+                if (uniqueHabits.size >= habitsActiveOnThisDay.length) {
+                    perfectDays++;
+                }
+            }
+        });
+
+        return validDays > 0 ? Math.round((perfectDays / validDays) * 100) : 0;
+    };
+    const overallCompletionRate = calculateCompletionRate();
+
+    // ✅ NEW STREAK LOGIC: Uses createdAt to evaluate the correct target
     const calculateStreaks = () => {
         let currentStreak = 0, bestStreak = 0, tempStreak = 0;
         if (history.length === 0 || habits.length === 0) return { current: 0, best: 0 };
         
         // Calculate Best Streak
         for (let i = 0; i < history.length; i++) {
-            const dayData = history[i];
-            if (dayData.habitIds.length >= habits.length) {
+            const dateObj = new Date(history[i].date);
+            const habitsActive = habits.filter(h => new Date(h.createdAt) <= dateObj);
+            
+            if (habitsActive.length > 0 && history[i].habitIds.length >= habitsActive.length) {
                 tempStreak++;
                 if (tempStreak > bestStreak) bestStreak = tempStreak;
             } else {
@@ -231,10 +263,12 @@ const HabitsPage = () => {
         
         // Calculate Current Streak
         for (let i = history.length - 1; i >= 0; i--) {
-            const dayData = history[i];
-            if (dayData.habitIds.length >= habits.length) {
+            const dateObj = new Date(history[i].date);
+            const habitsActive = habits.filter(h => new Date(h.createdAt) <= dateObj);
+            
+            if (habitsActive.length > 0 && history[i].habitIds.length >= habitsActive.length) {
                 currentStreak++;
-            } else if (dayData.date === new Date().toISOString().split('T')[0]) {
+            } else if (history[i].date === new Date().toISOString().split('T')[0]) {
                 continue; 
             } else {
                 break;
@@ -253,7 +287,15 @@ const HabitsPage = () => {
         <div className="max-w-5xl mx-auto px-4 py-8">
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
                 <StatCard icon="🔥" label="Current Streak" value={`${streak} days`} subtext={streak === 0 ? "Start today!" : "Keep going!"} color="bg-orange-50" />
-                <StatCard icon="📊" label="Today's Progress" value={`${progress}%`} subtext={`${completedToday}/${totalHabits} done`} color="bg-blue-50" />
+                
+                <StatCard 
+                    icon="📊" 
+                    label="Completion Rate" 
+                    value={`${overallCompletionRate}%`} 
+                    subtext="Based on perfect days" 
+                    color="bg-blue-50" 
+                />
+                
                 <StatCard icon="🏆" label="Best Streak" value={`${bestStreak} days`} subtext="All-time record" color="bg-yellow-50" />
                 <StatCard icon="✅" label="Total Habits" value={`${totalHabits}`} subtext={totalHabits === 0 ? "Add your first!" : "Active habits"} color="bg-green-50" />
             </div>
